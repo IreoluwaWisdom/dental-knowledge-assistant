@@ -1,13 +1,11 @@
 import streamlit as st
 
-from rag import (
-    retrieve,
-    build_context,
-    call_llm,
-    similarity_threshold,
-    get_sources
-)
+from rag import load_embedding_resources
 
 st.title("Dental Knowledge Assistant")
-st.success("RAG import successful.")
-st.write("If you can see this, importing rag.py did not crash the service.")
+
+with st.spinner("Loading embedding model..."):
+    model, chunk_embeddings = load_embedding_resources()
+
+st.success("Embedding model loaded successfully.")
+st.write(f"Number of chunk embeddings: {len(chunk_embeddings)}")
