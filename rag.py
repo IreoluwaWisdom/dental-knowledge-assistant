@@ -67,7 +67,7 @@ if not chunk_texts:
 # create embeddings from chunk texts
 chunk_embeddings = model.encode(chunk_texts)
 
-# a list of questions
+# a sample list of questions
 questions = [
     "Can I come before my scheduled appointment?",
 
@@ -121,6 +121,19 @@ def build_context(top_results):
     context = "\n\n".join(context_parts)
     return context
 
+# adds retrieved sources to the sources set
+def get_sources(top_results):
+    sources = set()
+
+    for index in top_results.indices:
+        chunk = chunks[index.item()]
+
+        sources.add(chunk["source"])
+
+    return sources
+
+
+
 # send context, and call the llm, then prints question, retrieved context, and llm answer
 def call_llm(question, context):
     response = client.chat.completions.create(
@@ -164,15 +177,15 @@ def call_llm(question, context):
     llm_output = response.choices[0].message.content
 
 
+    return llm_output
+    # print("QUESTION:")
+    # print(question)
 
-    print("QUESTION:")
-    print(question)
+    # print("\nRETRIEVED CONTEXT:")
+    # print(context)
 
-    print("\nRETRIEVED CONTEXT:")
-    print(context)
-
-    print("\nAI ANSWER: ")
-    print(llm_output, "\n")
+    # print("\nAI ANSWER: ")
+    # print(llm_output, "\n")
 
 
 def retrieve(question):
@@ -183,15 +196,18 @@ def retrieve(question):
     return top_results
 
 
+def main():
+    for question in questions:
+        
+        top_results = retrieve(question)
+        best_score = top_results.values[0].item()
+        if best_score < similarity_threshold:
+            print(f"QUESTION: {question}\n")
+            print("RETRIEVAL STATUS:")
+            print("No sufficiently relevant context found\n")
+        else:
+            context = build_context(top_results)
+            call_llm(question, context)
 
-for question in questions:
-    
-    top_results = retrieve(question)
-    best_score = top_results.values[0].item()
-    if best_score < similarity_threshold:
-        print(f"QUESTION: {question}\n")
-        print("RETRIEVAL STATUS:")
-        print("No sufficiently relevant context found\n")
-    else:
-        context = build_context(top_results)
-        call_llm(question, context)
+if __name__ == "__main__":
+    main()
