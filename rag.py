@@ -3,8 +3,8 @@ import os
 
 from dotenv import load_dotenv
 from openai import OpenAI
-from sentence_transformers import SentenceTransformer
-from sentence_transformers.util import cos_sim
+# from sentence_transformers import SentenceTransformer
+# from sentence_transformers.util import cos_sim
 
 # load environment variable
 load_dotenv()
@@ -17,9 +17,9 @@ client = OpenAI(
 )
 
 # load the model for embeddings
-def load_embedding_model():
-    model = SentenceTransformer("all-MiniLM-L6-v2")
-    return model
+# def load_embedding_model():
+#     model = SentenceTransformer("all-MiniLM-L6-v2")
+#     return model
 
 # set file path
 BASE_DIR = Path(__file__).resolve().parent
@@ -67,6 +67,8 @@ if not chunk_texts:
 
 # create embeddings from chunk texts
 def load_embedding_resources():
+    from sentence_transformers import SentenceTransformer
+
     model = SentenceTransformer("all-MiniLM-L6-v2")
     chunk_embeddings = model.encode(chunk_texts)
 
@@ -194,12 +196,18 @@ def call_llm(question, context):
 
 
 def retrieve(question, model, chunk_embeddings):
-    question_embedding = model.encode(question)
-    
-    similarities = cos_sim(question_embedding, chunk_embeddings)[0]
-    top_results = similarities.topk(top_k)
-    return top_results
+    from sentence_transformers.util import cos_sim
 
+    question_embedding = model.encode(question)
+
+    similarities = cos_sim(
+        question_embedding,
+        chunk_embeddings
+    )[0]
+
+    top_results = similarities.topk(top_k)
+
+    return top_results
 
 def main():
     model, chunk_embeddings = load_embedding_resources()
