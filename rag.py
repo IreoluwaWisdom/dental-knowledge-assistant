@@ -17,8 +17,9 @@ client = OpenAI(
 )
 
 # load the model for embeddings
-model = SentenceTransformer("all-MiniLM-L6-v2")
-
+def load_embedding_model():
+    model = SentenceTransformer("all-MiniLM-L6-v2")
+    return model
 
 # set file path
 BASE_DIR = Path(__file__).resolve().parent
@@ -65,7 +66,11 @@ if not chunk_texts:
 
 
 # create embeddings from chunk texts
-chunk_embeddings = model.encode(chunk_texts)
+def load_embedding_resources():
+    model = SentenceTransformer("all-MiniLM-L6-v2")
+    chunk_embeddings = model.encode(chunk_texts)
+
+    return model, chunk_embeddings
 
 # a sample list of questions
 questions = [
@@ -188,7 +193,7 @@ def call_llm(question, context):
     # print(llm_output, "\n")
 
 
-def retrieve(question):
+def retrieve(question, model, chunk_embeddings):
     question_embedding = model.encode(question)
     
     similarities = cos_sim(question_embedding, chunk_embeddings)[0]
@@ -197,9 +202,15 @@ def retrieve(question):
 
 
 def main():
+    model, chunk_embeddings = load_embedding_resources()
+
     for question in questions:
         
-        top_results = retrieve(question)
+        top_results = retrieve(
+            question,
+            model,
+            chunk_embeddings
+        )
         best_score = top_results.values[0].item()
         if best_score < similarity_threshold:
             print(f"QUESTION: {question}\n")
