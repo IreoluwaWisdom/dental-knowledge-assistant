@@ -1,10 +1,10 @@
 from pathlib import Path
 import os
+import numpy as np
 
 from dotenv import load_dotenv
 from openai import OpenAI
-# from sentence_transformers import SentenceTransformer
-# from sentence_transformers.util import cos_sim
+import json
 
 # load environment variable
 load_dotenv()
@@ -16,10 +16,42 @@ client = OpenAI(
     base_url="https://api.groq.com/openai/v1"
 )
 
-# load the model for embeddings
-# def load_embedding_model():
-#     model = SentenceTransformer("all-MiniLM-L6-v2")
-#     return model
+embedding_client = OpenAI(
+    api_key=os.getenv("OPENROUTER_API_KEY"),
+    base_url="https://openrouter.ai/api/v1"
+
+)
+
+def get_embedding(text):
+    response = embedding_client.embeddings.create(model="liquid/lfm-2.5-embedding-350m:free", input=text)
+
+    embedding = response.data[0].embedding
+
+    return embedding
+
+
+def get_embeddings(texts):
+    response = embedding_client.embeddings.create(
+        model="liquid/lfm-2.5-embedding-350m:free",
+        input=texts
+    )
+
+    embeddings = [
+        item.embedding
+        for item in response.data
+    ]
+
+    return embeddings
+
+
+def cosine_similarity(vector_a, vector_b):
+    vector_a = np.array(vector_a)
+    vector_b = np.array(vector_b)
+    dot_product = np.dot(vector_a, vector_b)
+    magnitude_a = np.linalg.norm(vector_a)
+    magnitude_b = np.linalg.norm(vector_b)
+    return dot_product / (magnitude_a * magnitude_b)
+
 
 # set file path
 BASE_DIR = Path(__file__).resolve().parent
@@ -54,25 +86,32 @@ for document in documents:
 
 
 top_k = 5
-similarity_threshold = 0.45
+similarity_threshold = 0.35
 
 
 # put chunk contents inside chunk texts list
-chunk_texts = [chunk["content"] for chunk in chunks]
-
+chunk_texts = [
+    f"{chunk['source']}: {chunk['content']}"
+    for chunk in chunks
+]
 # handle a chunk that is an empty string
 if not chunk_texts:
     raise ValueError("No knowledge chunks were loaded.")
 
+# get chunk embeddings
+def get_chunk_embeddings():
+    embeddings_path = BASE_DIR / "chunk_embeddings.json"
 
-# create embeddings from chunk texts
-def load_embedding_resources():
-    from sentence_transformers import SentenceTransformer
+    with open(embeddings_path, "r", encoding="utf-8") as file:
+        chunk_embeddings = json.load(file)
 
-    model = SentenceTransformer("all-MiniLM-L6-v2")
-    chunk_embeddings = model.encode(chunk_texts)
+    if len(chunk_embeddings) != len(chunks):
+        raise ValueError(
+            "Number of saved embeddings does not match number of knowledge chunks."
+        )
 
-    return model, chunk_embeddings
+
+    return chunk_embeddings
 
 # a sample list of questions
 questions = [
@@ -101,14 +140,16 @@ def build_context(top_results):
 
 
 
-    for score, index in zip(top_results.values, top_results.indices):
-        chunk = chunks[index.item()]
+    for result in top_results:
+        index =  result["index"]
+        score = result["score"]
+        chunk = chunks[index]
 
 
         retrieved_chunks.append({
             "content": chunk["content"],
             "source": chunk["source"],
-            "score": score.item()
+            "score": score
         })
 
 
@@ -132,8 +173,9 @@ def build_context(top_results):
 def get_sources(top_results):
     sources = set()
 
-    for index in top_results.indices:
-        chunk = chunks[index.item()]
+    for result in top_results:
+        index = result["index"]
+        chunk = chunks[index]
 
         sources.add(chunk["source"])
 
@@ -195,38 +237,77 @@ def call_llm(question, context):
     # print(llm_output, "\n")
 
 
-def retrieve(question, model, chunk_embeddings):
-    from sentence_transformers.util import cos_sim
+def retrieve(question, chunk_embeddings):
+    question_embedding = get_embedding(question)
+    similarities = []
+    for index, chunk_embedding in enumerate(chunk_embeddings):
+        score = cosine_similarity(question_embedding, chunk_embedding)
+        similarities.append({
+            "index": index, "score": score
+            })
 
-    question_embedding = model.encode(question)
-
-    similarities = cos_sim(
-        question_embedding,
-        chunk_embeddings
-    )[0]
-
-    top_results = similarities.topk(top_k)
-
+    similarities_sorted = sorted(similarities, reverse=True, key= lambda item: item["score"])
+    top_results = similarities_sorted[:top_k]
     return top_results
 
-def main():
-    model, chunk_embeddings = load_embedding_resources()
+def evaluate_thresholds(chunk_embeddings):
+    results = []
 
     for question in questions:
-        
+        top_results = retrieve(question, chunk_embeddings)
+        best_score = top_results[0]["score"]
+
+        results.append({
+            "question": question,
+            "score": best_score
+        })
+
+    thresholds = [0.25, 0.30, 0.35, 0.40, 0.45]
+
+    for threshold in thresholds:
+        print(f"\nTHRESHOLD: {threshold}")
+
+        for result in results:
+            if result["score"] >= threshold:
+                status = "PASS"
+            else:
+                status = "REJECT"
+
+            print(
+                f"{result['score']:.4f} | "
+                f"{status} | "
+                f"{result['question']}"
+            )
+               
+def main():
+    chunk_embeddings = get_chunk_embeddings()
+
+    for question in questions:
+
         top_results = retrieve(
             question,
-            model,
             chunk_embeddings
         )
-        best_score = top_results.values[0].item()
-        if best_score < similarity_threshold:
+
+        filtered_results = [
+            result
+            for result in top_results
+            if result["score"] >= similarity_threshold
+        ]
+
+        if not filtered_results:
             print(f"QUESTION: {question}\n")
             print("RETRIEVAL STATUS:")
             print("No sufficiently relevant context found\n")
+
         else:
-            context = build_context(top_results)
-            call_llm(question, context)
+            context = build_context(filtered_results)
+            answer = call_llm(question, context)
+
+            print(f"QUESTION: {question}\n")
+            print("ANSWER:")
+            print(answer)
+            print()
 
 if __name__ == "__main__":
     main()
